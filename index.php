@@ -20,25 +20,36 @@ function redirect(string $path)
     header('Location:' . $path);
 }
 
-function pathToBack($path){
-    $parts  = explode('/', $path);
+
+function pathToBack($path)
+{
+    $parts = explode('/', $path);
     array_pop($parts);
     $path = implode('/', $parts);
     return $path;
 }
 
+//URI
+$uri = explode('/', $_SERVER['REQUEST_URI']);
+array_shift($uri); // пропускаем пустй элемент
+$method = array_shift($uri);
+$file_name = explode('?', urldecode(implode('/', $uri)))[0];
+$file_permission = substr(sprintf('%o', fileperms($file_name)), -4);
+
 //delete
 if (isset($_GET['delete'])) {
+    $dir = $_GET['delete'];
     if (is_dir($_GET['delete'])) {
-        rmdir($_GET['delete']);
+        system("rm -rf " . escapeshellarg($dir));
     } else {
         unlink($_GET['delete']);
     }
     redirect($_SERVER['HTTP_REFERER']);
 }
 
-if (isset($_GET['path'])) {
-    $currentPath = $_GET['path'];
+//set current path
+if (!empty($file_name)) {
+    $currentPath = $file_name;
 } else {
     $currentPath = '.';
 }
@@ -53,11 +64,12 @@ foreach ($currentFileList as $file) {
         'type' => is_dir($fullFilePath) ? 'Dir' : 'File',
         'size' => filesize($fullFilePath),
         'permission' => substr(sprintf('%o', fileperms($fullFilePath)), -4),
-        'owner' => posix_getpwuid(fileowner($fullFilePath))['name'],
+       // 'owner' => posix_getpwuid(fileowner($fullFilePath))['name'],
         'modify_date' => date("Y-m-d H:i:s", filemtime($fullFilePath)),
     ];
 }
 
+//apply sorting
 if (isset($_GET['sort'])) {
     switch ($_GET['sort']) {
         case 'filename':
@@ -72,48 +84,53 @@ if (isset($_GET['sort'])) {
     }
 }
 
+//apply sorting
 if (isset($_POST['edit'])) {
     file_put_contents($_POST['old_filepath'], $_POST['content']);
     rename($_POST['old_filepath'], $_POST['new_filepath']);
-    redirect('?path=' . pathinfo($_POST['new_filepath'], PATHINFO_DIRNAME));
+    redirect('/edit/' . pathinfo($_POST['new_filepath'], PATHINFO_DIRNAME));
 }
+
+//save new permissions
 if (isset($_POST['edit_permission'])) {
     $r = octdec($_POST['mode']);
     chmod($_POST['filepath'], octdec($_POST['mode']));
-    redirect('?path=' . pathinfo($_POST['filepath'], PATHINFO_DIRNAME));
+    redirect('/edit/' . pathinfo($_POST['filepath'], PATHINFO_DIRNAME));
 }
 
+//save new file to current dir
 if (isset($_FILES['file'])) {
     $uploadfile = $currentPath . '/' . basename($_FILES['file']['name']);
     move_uploaded_file($_FILES['file']['tmp_name'], $uploadfile);
-    redirect('?path=' .$currentPath);
+    redirect('/edit/' . $currentPath);
 }
 
+//create new folder to current dir
 if (isset($_POST['create_folder'])) {
     mkdir($currentPath . '/' . $_POST['create_folder']);
-    redirect($_SERVER['PHP_SELF']);
+    redirect('/edit/' . $currentPath);
 }
 ?>
 <html>
 <head>
-    <link href="main.css" rel="stylesheet">
+    <link href="/main.css" rel="stylesheet">
 </head>
 <body>
 <a href="/">To main page</a>
-<a href="?path=<?= pathToBack($currentPath); ?>">Back</a>
-<?php if (isset($_GET['edit'])): ?>
-    <h2>File to edit: <?= $_GET['edit']; ?></h2>
+<a href="/edit/<?= pathToBack($currentPath); ?>">Back</a>
+<?php if ($method == 'edit' and is_file($file_name)) : ?>
+    <h2>File to edit: <?= $file_name; ?></h2>
     <form method="post" action="">
-        <textarea rows="20" name="content"><?= file_get_contents($_GET['edit']) ?></textarea>
-        <input type="hidden" value="<?= $_GET['edit'] ?>" name="old_filepath">
-        <input type="text" value="<?= $_GET['edit'] ?>" name="new_filepath">
+        <textarea rows="20" name="content"><?= file_get_contents($file_name) ?></textarea>
+        <input type="hidden" value="<?= $file_name ?>" name="old_filepath">
+        <input type="text" value="<?= $file_name ?>" name="new_filepath">
         <input type="submit" name="edit" value="send">
     </form>
-<?php elseif (isset($_GET['permission'])): ?>
-    <h2>File to edit permission: <?= $_GET['permission']; ?> (<?= $_GET['current_mode']; ?>)</h2>
+<?php elseif ($method == 'permission'): ?>
+    <h2>File to edit permission: <?= $file_name; ?> (<?= $file_permission; ?>)</h2>
     <form method="post" action="">
         <input type="text" name="mode">
-        <input type="hidden" value="<?= $_GET['permission'] ?>" name="filepath">
+        <input type="hidden" value="<?= $file_name ?>" name="filepath">
         <input type="submit" name="edit_permission" value="send">
     </form>
 <?php else: ?>
@@ -143,13 +160,12 @@ if (isset($_POST['create_folder'])) {
         <?php foreach ($prepareFiles as $fileInfo): ?>
             <tr>
                 <td>
-                    <?php $action = $fileInfo['type'] == 'Dir' ? 'path' : 'edit'; ?>
-                    <a href="?<?= $action . '=' . $currentPath . '/' . $fileInfo['filename'] ?>"><?= $fileInfo['filename'] ?></a>
+                    <a href="/edit/<?= $currentPath . '/' . $fileInfo['filename'] ?>"><?= $fileInfo['filename'] ?></a>
                 </td>
                 <td><?= $fileInfo['type'] ?></td>
                 <td><?= $fileInfo['size'] ?></td>
                 <td>
-                    <a href="?current_mode=<?= $fileInfo['permission'] ?>&&permission=<?= $currentPath . '/' . $fileInfo['filename'] ?>"><?= $fileInfo['permission'] ?></a>
+                    <a href="/permission/<?= $currentPath . '/' . $fileInfo['filename'] ?>"><?= $fileInfo['permission'] ?></a>
                 </td>
                 <td><?= $fileInfo['owner'] ?></td>
                 <td><?= $fileInfo['modify_date'] ?></td>
